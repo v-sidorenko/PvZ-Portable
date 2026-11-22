@@ -1,0 +1,75 @@
+name: Arm64 handheld build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux-aarch64:
+    name: Build for Linux (aarch64, handheld-friendly)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 0.2.7
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsdl2-dev zlib1g-dev
+
+      - name: Build libopenmpt (static)
+        run: |
+          git clone --depth=1 --branch libopenmpt-0.8.10 https://github.com/OpenMPT/openmpt.git openmpt-src
+          cd openmpt-src
+          make CONFIG=gcc STATIC_LIB=1 SHARED_LIB=0 \
+            EXAMPLES=0 OPENMPT123=0 TEST=0 \
+            NO_ZLIB=1 NO_MPG123=1 NO_OGG=1 NO_VORBIS=1 NO_VORBISFILE=1 \
+            NO_PORTAUDIO=1 NO_PORTAUDIOCPP=1 NO_PULSEAUDIO=1 \
+            NO_SDL2=1 NO_FLAC=1 NO_SNDFILE=1 -j$(nproc)
+          make CONFIG=gcc STATIC_LIB=1 SHARED_LIB=0 \
+            EXAMPLES=0 OPENMPT123=0 TEST=0 \
+            PREFIX="$HOME/pvz-deps" install
+
+      - name: Build libpng (static)
+        run: |
+          git clone --depth=1 --branch v1.6.59 https://github.com/pnggroup/libpng.git libpng-src
+          cmake -G Ninja -B build-libpng libpng-src \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/pvz-deps" \
+            -DPNG_SHARED=OFF -DPNG_STATIC=ON \
+            -DPNG_EXECUTABLES=OFF -DPNG_TESTS=OFF
+          cmake --build build-libpng -j$(nproc)
+          cmake --install build-libpng
+
+      - name: Build libjpeg-turbo (static)
+        run: |
+          git clone --depth=1 --branch 3.1.4 https://github.com/libjpeg-turbo/libjpeg-turbo.git jpeg-src
+          cmake -G Ninja -B build-jpeg jpeg-src \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/pvz-deps" \
+            -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
+            -DWITH_TURBOJPEG=OFF
+          cmake --build build-jpeg -j$(nproc)
+          cmake --install build-jpeg
+
+      - name: Build PvZ-Portable
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$HOME/pvz-deps" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+          cmake --build build -j$(nproc)
+
+      - name: Prepare Artifact
+        run: |
+          mkdir -p dist
+          cp build/pvz-portable dist/
+          chmod +x dist/pvz-portable
+          strip dist/pvz-portable
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pvz-portable-linux-aarch64
+          path: dist/
