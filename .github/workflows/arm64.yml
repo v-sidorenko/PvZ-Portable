@@ -7,48 +7,92 @@ jobs:
   build-linux-aarch64:
     name: Build for Linux (aarch64, handheld-friendly)
     runs-on: ubuntu-24.04-arm
+    # Same toolchain baseline as upstream's linux-static job, native arm64 flavor.
+    container: quay.io/pypa/manylinux_2_34_aarch64
     steps:
       - uses: actions/checkout@v6
         with:
           ref: 0.2.7
           fetch-depth: 0
 
+      - name: Fix Git Safe Directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsdl2-dev zlib1g-dev
+          dnf install -y \
+            alsa-lib-devel \
+            libdrm-devel \
+            mesa-libgbm-devel \
+            mesa-libGL-devel \
+            ninja-build \
+            pkgconf-pkg-config \
+            wget \
+            zlib-devel \
+            zlib-static
+
+      - name: Resolve Dep Versions
+        run: |
+          SDL2_TAG=2.32.10
+          OPENMPT_TAG=libopenmpt-0.8.10
+          LIBPNG_TAG=v1.6.59
+          JPEG_TAG=3.1.4
+          echo "Using SDL2 $SDL2_TAG, libopenmpt $OPENMPT_TAG, libpng $LIBPNG_TAG, libjpeg-turbo $JPEG_TAG"
+
+      - name: Build SDL2 (shared; only for headers/linking, device uses its own)
+        run: |
+          wget -q "https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz"
+          tar xf "SDL2-2.32.10.tar.gz"
+          cmake -G Ninja -B build-sdl2 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/pvz-deps" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TEST=OFF \
+            -DSDL_JACK=OFF \
+            -DSDL_SNDIO=OFF \
+            -DSDL_DBUS=OFF \
+            -DSDL_IBUS=OFF \
+            -DSDL_LIBSAMPLERATE=OFF \
+            "SDL2-2.32.10"
+          cmake --build build-sdl2 -j$(nproc)
+          cmake --install build-sdl2
 
       - name: Build libopenmpt (static)
         run: |
-          git clone --depth=1 --branch libopenmpt-0.8.10 https://github.com/OpenMPT/openmpt.git openmpt-src
-          cd openmpt-src
-          make CONFIG=gcc STATIC_LIB=1 SHARED_LIB=0 \
+          git clone --depth=1 --branch libopenmpt-0.8.10 https://github.com/OpenMPT/openmpt.git libopenmpt-src
+          cd libopenmpt-src
+          make CONFIG=gcc \
+            STATIC_LIB=1 SHARED_LIB=0 \
             EXAMPLES=0 OPENMPT123=0 TEST=0 \
             NO_ZLIB=1 NO_MPG123=1 NO_OGG=1 NO_VORBIS=1 NO_VORBISFILE=1 \
             NO_PORTAUDIO=1 NO_PORTAUDIOCPP=1 NO_PULSEAUDIO=1 \
-            NO_SDL2=1 NO_FLAC=1 NO_SNDFILE=1 -j$(nproc)
-          make CONFIG=gcc STATIC_LIB=1 SHARED_LIB=0 \
+            NO_SDL2=1 NO_FLAC=1 NO_SNDFILE=1 \
+            -j$(nproc)
+          make CONFIG=gcc \
+            STATIC_LIB=1 SHARED_LIB=0 \
             EXAMPLES=0 OPENMPT123=0 TEST=0 \
             PREFIX="$HOME/pvz-deps" install
 
-      - name: Build libpng (static)
+      - name: Build Codec Libraries (static)
         run: |
-          git clone --depth=1 --branch v1.6.59 https://github.com/pnggroup/libpng.git libpng-src
+          git clone --depth=1 --branch "v1.6.59" https://github.com/pnggroup/libpng.git libpng-src
           cmake -G Ninja -B build-libpng libpng-src \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$HOME/pvz-deps" \
-            -DPNG_SHARED=OFF -DPNG_STATIC=ON \
-            -DPNG_EXECUTABLES=OFF -DPNG_TESTS=OFF
+            -DPNG_SHARED=OFF \
+            -DPNG_STATIC=ON \
+            -DPNG_EXECUTABLES=OFF \
+            -DPNG_TESTS=OFF
           cmake --build build-libpng -j$(nproc)
           cmake --install build-libpng
 
-      - name: Build libjpeg-turbo (static)
-        run: |
-          git clone --depth=1 --branch 3.1.4 https://github.com/libjpeg-turbo/libjpeg-turbo.git jpeg-src
-          cmake -G Ninja -B build-jpeg jpeg-src \
+          git clone --depth=1 --branch "3.1.4" https://github.com/libjpeg-turbo/libjpeg-turbo.git libjpeg-turbo-src
+          cmake -G Ninja -B build-jpeg libjpeg-turbo-src \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$HOME/pvz-deps" \
-            -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_STATIC=ON \
             -DWITH_TURBOJPEG=OFF
           cmake --build build-jpeg -j$(nproc)
           cmake --install build-jpeg
@@ -57,15 +101,13 @@ jobs:
         run: |
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$HOME/pvz-deps" \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+            -DBUILD_STATIC=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+            -DCMAKE_PREFIX_PATH="$HOME/pvz-deps"
           cmake --build build -j$(nproc)
 
-      - name: Prepare Artifact
-        run: |
           mkdir -p dist
           cp build/pvz-portable dist/
-          chmod +x dist/pvz-portable
           strip dist/pvz-portable
 
       - name: Upload Artifact
