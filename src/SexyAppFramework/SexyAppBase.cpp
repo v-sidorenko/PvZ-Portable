@@ -259,6 +259,7 @@ SexyAppBase::SexyAppBase()
 	mCustomCursorImage = nullptr;
 	mCustomCursorImageNum = -1;
 	mCursorNum = CURSOR_POINTER;
+	mHiddenCursor = nullptr;
 	mMouseIn = false;
 	mRunning = false;
 	mActive = true;
@@ -425,6 +426,12 @@ SexyAppBase::~SexyAppBase()
 	}
 
 	ResetCustomCursorCache();
+
+	if (mHiddenCursor != nullptr)
+	{
+		SDL_FreeCursor(mHiddenCursor);
+		mHiddenCursor = nullptr;
+	}
 
 	for (int aCursorIdx = 0; aCursorIdx < NUM_CURSORS; aCursorIdx++)
 	{
@@ -2426,7 +2433,30 @@ void SexyAppBase::EnforceCursor()
 
 	if (aCursorNum == CURSOR_NONE)
 	{
-		SDL_ShowCursor(SDL_DISABLE);
+		// Handheld/KMSDRM workaround: SDL_ShowCursor(SDL_DISABLE) drops mouse
+		// focus on some kmsdrm drivers, which stops ALL mouse event delivery
+		// (menu works, in-level input dead). Show a fully transparent 1x1
+		// cursor instead - it counts as "shown" for SDL, so mouse focus is
+		// retained, but nothing is drawn on screen.
+		if (mHiddenCursor == nullptr)
+		{
+			SDL_Surface* aSurface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_ABGR8888);
+			if (aSurface != nullptr)
+			{
+				mHiddenCursor = SDL_CreateColorCursor(aSurface, 0, 0);
+				SDL_FreeSurface(aSurface);
+			}
+		}
+
+		if (mHiddenCursor != nullptr)
+		{
+			SDL_SetCursor(mHiddenCursor);
+			SDL_ShowCursor(SDL_ENABLE);
+		}
+		else
+		{
+			SDL_ShowCursor(SDL_DISABLE); // fallback for drivers without this quirk
+		}
 		return;
 	}
 
