@@ -266,6 +266,7 @@ public:
 	int						mCursorNum;
 	SDL_Cursor*				mSysCursors[NUM_CURSORS];
 	SDL_Cursor*				mCustomCursor;
+	SDL_Cursor*				mHiddenCursor; // transparent "shown" cursor (KMSDRM mouse-focus workaround)
 	Image*					mCustomCursorImage;
 	int						mCustomCursorImageNum;
 	std::atomic<_Font*>		mDefaultFont = nullptr; // app-injected fallback for widgets without an explicit font
