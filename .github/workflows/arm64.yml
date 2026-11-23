@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: 0.2.7
+          ref: handheld-0.2.7-fixes
           fetch-depth: 0
 
       - name: Fix Git Safe Directory
